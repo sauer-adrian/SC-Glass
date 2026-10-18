@@ -37,6 +37,7 @@ const store = {
   del(k) { try { localStorage.removeItem("scg." + k); } catch {} },
 };
 const PARAMS = new URLSearchParams(location.search);
+const emit = (...a) => { try { S.onEvent && S.onEvent(...a); } catch {} };
 
 /* =====================================================================================
    State
@@ -48,7 +49,8 @@ const S = {
   userDecks: [], deckId: store.get("deck", "standard"), page: store.get("page", ""),
   mode: "play", lat: null, game: null, vjoy: { ok: false, axes: [] }, overlay: { available: false, monitors: [] },
   opt: { sound: store.get("sound", true), haptic: store.get("haptic", true), follow: store.get("follow", true),
-         skin: store.get("skin", "") },
+         skin: store.get("skin", ""), plain: store.get("plain", false) },
+  training: false, onEvent: null, autobind: null, host: "",
   overlayMode: PARAMS.has("overlay"),
 };
 
@@ -220,13 +222,16 @@ function updateDeckChip() {
    State changes
    ===================================================================================== */
 function setState(k, v, opts = {}) {
-  S.states[k] = v; store.set("states", S.states);
-  if (!opts.local && S.authed) wsSend({ t: "state", key: k, value: v });
+  S.states[k] = v;
+  if (!S.training) store.set("states", S.states);
+  if (!opts.local && S.authed && !S.training) wsSend({ t: "state", key: k, value: v });
+  emit("state", k, v, opts);
   renderWhere(it => it.s === k || it.g === k || (it.k === "macro"));
 }
 function setStates(obj, opts = {}) {
-  Object.assign(S.states, obj); store.set("states", S.states);
-  if (!opts.local && S.authed) wsSend({ t: "states", states: obj });
+  Object.assign(S.states, obj);
+  if (!S.training) store.set("states", S.states);
+  if (!opts.local && S.authed && !S.training) wsSend({ t: "states", states: obj });
   renderAll();
 }
 function lampFor(item) {
@@ -245,7 +250,7 @@ function nextLamp(item) {
    ===================================================================================== */
 function wsSend(o) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(o)); }
 function command(o) {
-  if (S.demo) return Promise.resolve({ ok: true });
+  if (S.demo || S.training) return Promise.resolve({ ok: true });
   if (!S.authed) return Promise.resolve({ ok: false, err: "offline" });
   const id = ++S.seq;
   return new Promise(res => {
@@ -267,7 +272,7 @@ function request(o, type) {
 /* Press an action once. Returns true when the PC accepted it. */
 async function fire(ref, el, opts = {}) {
   const b = pick(ref);
-  if (!b.keys) { unboundWarn(el, b.name); return false; }
+  if (!b.keys) { unboundWarn(el, b.name, b.ref); return false; }
   const sp = { ...spec(b.mode), ...(opts.ms ? { ms: opts.ms } : {}) };
   if (sp.hold) sp.ms = opts.ms || 300;
   if (el) animatePress(el, sp.ms);
@@ -276,12 +281,14 @@ async function fire(ref, el, opts = {}) {
   const dt = Math.round(performance.now() - t0);
   const how = sp.repeat ? "double tap" : sp.ms >= 250 ? `hold ${(sp.ms / 1000).toFixed(2).replace(/0$/, "")} s` : "tap";
   if (r.ok) {
-    if (!opts.quiet) readout(`<b>${esc(opts.label || b.name)}</b> ▸ ${esc(fmtKeys(b.keys))} · ${how} ${S.demo ? '<span class="x">demo, not sent</span>' : `<em>✓</em> ${dt} ms`}`);
+    if (!opts.quiet) readout(`<b>${esc(opts.label || b.name)}</b> ▸ ${esc(fmtKeys(b.keys))} · ${how} ${notSent()}`);
+    emit("fire", Array.isArray(ref) ? ref[0] : ref);
     return true;
   }
   failed(el, opts.label || b.name, r.err);
   return false;
 }
+function notSent() { return S.training ? '<span class="x">drill, not sent</span>' : S.demo ? '<span class="x">demo, not sent</span>' : "<em>✓</em>"; }
 function animatePress(el, ms) {
   el.style.setProperty("--dur", ms + "ms");
   el.classList.remove("flash", "run"); void el.offsetWidth;
@@ -294,7 +301,7 @@ function animatePress(el, ms) {
 const HOLDS = new Map();
 async function holdStart(el, ref, label) {
   const b = pick(ref);
-  if (!b.keys) { unboundWarn(el, b.name); return; }
+  if (!b.keys) { unboundWarn(el, b.name, b.ref); return; }
   sound("click");
   const hid = "h" + (++S.seq);
   HOLDS.set(el, { hid, name: label || b.name });
@@ -318,13 +325,13 @@ function condOk(c, work) {
     (v && typeof v === "object" && "ne" in v) ? String(work[k]) !== String(v.ne) : String(work[k]) === String(v));
 }
 function expandMacro(steps) {
-  const work = { ...S.states }, out = [], sets = {}, names = [], missing = [];
+  const work = { ...S.states }, out = [], sets = {}, names = [], missing = [], missingActs = [];
   for (const st of steps || []) {
     if (st.wait) { out.push({ wait: +st.wait }); continue; }
     if (st.if && !condOk(st.if, work)) continue;
     if (st.a) {
       const b = pick(st.a);
-      if (!b.keys) { missing.push(b.name); continue; }
+      if (!b.keys) { missing.push(b.name); if (b.act) missingActs.push(b.act); continue; }
       const sp = spec(b.mode);
       out.push({ keys: b.keys, ms: +st.ms || (sp.hold ? 300 : sp.ms), repeat: sp.repeat || 1 });
       names.push(b.name);
@@ -333,10 +340,11 @@ function expandMacro(steps) {
     if (st.after) out.push({ wait: +st.after });
   }
   while (out.length && out[out.length - 1].wait !== undefined) out.pop();
-  return { out, sets, names, missing };
+  return { out, sets, names, missing, missingActs };
 }
 async function runMacro(item, el) {
-  const { out, sets, names, missing } = expandMacro(item.steps);
+  const { out, sets, names, missing, missingActs } = expandMacro(item.steps);
+  if (missingActs.length && S.autobind && S.autobind.consent && missingActs.every(canWire)) wireActions(missingActs);
   if (!out.length) {
     if (missing.length) return unboundWarn(el, missing.join(", "));
     toast(`${item.lg}: nothing to do, the lights say it's already done.`);
@@ -349,15 +357,45 @@ async function runMacro(item, el) {
   const r = await command({ t: "seq", steps: out });
   if (!r.ok) return failed(el, item.lg, r.err);
   setStates(sets);
-  readout(`<b>${esc(item.lg)}</b> ▸ ${esc(names.join(" → "))}${S.demo ? ' <span class="x">demo, not sent</span>' : " <em>✓</em>"}`);
+  readout(`<b>${esc(item.lg)}</b> ▸ ${esc(names.join(" → "))} ${notSent()}`);
+  emit("macro", item.lg);
   if (missing.length) toast(`${item.lg} skipped ${missing.join(", ")}: no key bound.`, "warn");
 }
 
-function unboundWarn(el, name) {
+function unboundWarn(el, name, ref) {
   if (el) { el.classList.add("err"); setTimeout(() => el.classList.remove("err"), 600); }
   sound("err");
-  toast(`${name} has no key yet. Bind it in Star Citizen's keybinding menu, or tap KEYS here and set one.`, "warn");
+  const d = ref ? actDef(ref) : null;
+  if (d && d.act && canWire(d.act)) {
+    if (S.autobind.consent) { wireActions([d.act]); return; }
+    toast(`${name} has no key yet. Open KEYS and tap "Give it a spare key", and SC Glass sets it up in Star Citizen for you.`, "warn");
+  } else {
+    toast(`${name} has no key yet. Bind it in Star Citizen's keybinding menu, or tap KEYS here and set one.`, "warn");
+  }
   readout(`<b>${esc(name)}</b> <span class="x">has no key</span>`);
+}
+/* Spare keys: the PC gives unbound Star Citizen actions a free key (RCtrl+F1…) in the game's own keybinds. */
+function canWire(act) { return !!(S.authed && S.autobind && (S.autobind.wirable || []).includes(act)); }
+async function wireActions(acts) {
+  const r = await command({ t: "autobind", actions: acts });
+  if (!r.ok) return toast(r.err === "offline" ? "Not connected to your PC." : `Couldn't set up the key: ${r.err}`, "bad");
+  const wired = Object.entries(r.wired || {});
+  if (wired.length) {
+    toast(`${wired.map(([a, k]) => `${nameOfAct(a)}: ${fmtKeys(k)}`).join(", ")}. Restart Star Citizen if it's running to use ${wired.length > 1 ? "them" : "it"}.`);
+  } else if (r.waiting) {
+    toast("Star Citizen is running, and it rewrites its keybinds when it closes. SC Glass adds the key right after you quit the game.");
+  } else if (r.error) toast(r.error, "warn");
+  return r;
+}
+function nameOfAct(act) { const id = Object.keys(A).find(k => A[k][0] === act); return id ? A[id][3] : act; }
+function deckWirable(deck) {
+  const refs = new Set(), add = r => (Array.isArray(r) ? r : [r]).forEach(x => x && typeof x === "string" && !x.startsWith("keys:") && refs.add(x));
+  for (const p of deck.pages || []) for (const pn of p.panels || []) for (const it of pn.items || []) {
+    add(it.a); add(it.dn); add(it.up);
+    if (Array.isArray(it.opts)) it.opts.forEach(o => add(o.a));
+    if (Array.isArray(it.steps)) it.steps.forEach(st => add(st.a));
+  }
+  return [...refs].map(actDef).filter(d => d && d.act && !binding(Object.keys(A).find(k => A[k][0] === d.act)).keys && canWire(d.act)).map(d => d.act);
 }
 function failed(el, name, err) {
   if (el) { el.classList.add("err"); setTimeout(() => el.classList.remove("err"), 700); }
@@ -481,13 +519,9 @@ function toast(msg, kind = "") {
 }
 function readout(html) { $("#readout").innerHTML = html; }
 
-let wl = null;
-async function wake() {
-  if (wl || !("wakeLock" in navigator)) return;
-  try { wl = await navigator.wakeLock.request("screen"); wl.addEventListener("release", () => wl = null); } catch {}
-}
+function wake() { NOSLEEP.on(); }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") { wl = null; wake(); }
+  if (document.visibilityState === "visible") NOSLEEP.on();
   else HOLDS.forEach((_, el) => holdEnd(el));    // never leave a key held when the tablet sleeps
 });
 
@@ -531,6 +565,7 @@ function onMsg(m) {
       S.authed = true; S.version = m.version; S.backend = m.backend; S.platform = m.platform;
       S.sc = m.sc || {}; S.custom = m.custom || {}; S.am = m.actionmaps; S.focus = m.focus; S.settings = m.settings || {};
       S.userDecks = m.decks || []; S.game = m.game; S.vjoy = m.vjoy || { ok: false, axes: [] }; S.overlay = m.overlay || {};
+      S.autobind = m.autobind || null; S.host = m.host || "";
       if (m.states && Object.keys(m.states).length) Object.assign(S.states, m.states);
       else wsSend({ t: "states", states: S.states });
       store.set("states", S.states);
@@ -545,6 +580,7 @@ function onMsg(m) {
       if (S.mode !== "edit") renderDeck(); else renderAll();
       fillSettings();
       clearInterval(pingT); ping(); pingT = setInterval(ping, 3000);
+      if (first && !store.get("onboarded", false) && !S.overlayMode) ONBOARD.start();
       break;
     }
     case "denied":
@@ -558,6 +594,7 @@ function onMsg(m) {
     case "states":
       Object.assign(S.states, m.states); store.set("states", S.states); renderAll(); break;
     case "focus": S.focus = m.ok; setFocusLamp(); break;
+    case "autobind": S.autobind = { ...(S.autobind || {}), ...m }; delete S.autobind.t; renderAll(); if (bindFor) fillBind(); break;
     case "pong": S.lat = Math.round(performance.now() - m.ts); $("#latency").textContent = S.lat + " ms"; break;
     case "ack": case "market": case "commodities": {
       const fn = S.pending.get(m.id); if (fn) { S.pending.delete(m.id); fn(m); } break;
@@ -622,6 +659,7 @@ function enterDemo() {
   readout("Demo deck. Tap anything; nothing reaches a game. Settings explains how to connect your PC.");
   if (!getDeck(S.deckId)) S.deckId = "standard";
   renderDeck(); fillSettings();
+  if (!store.get("onboarded", false)) ONBOARD.start();
 }
 
 /* =====================================================================================
@@ -728,8 +766,10 @@ function fillBind() {
   $("#bindSrc").textContent = { custom: "Custom key saved on this deck", game: "From your Star Citizen keybinds",
     default: "Star Citizen default", cleared: "Unbound in your Star Citizen keybinds", none: "Star Citizen has no default key for this" }[b.src];
   $("#bindReset").disabled = b.src !== "custom" || !b.act;
+  $("#bindWire").hidden = !(b.act && !b.keys && canWire(b.act));
   $("#bindNote").textContent = b.src === "none"
-    ? `Pick a free key, then bind the same key to "${b.name}" in Star Citizen (Options › Keybindings). F13–F24 never clash with anything.`
+    ? (canWire(b.act) ? `Star Citizen has no key for this. "Give it a spare key" sets one up in the game's keybinds for you (Right Ctrl + an F-key, unused by the game).`
+      : `Pick a free key, then bind the same key to "${b.name}" in Star Citizen (Options › Keybindings). Right Ctrl + F1–F12 are unused by the game.`)
     : "Match what you set in Star Citizen. Keys you change in the game's own keybinding menu are picked up automatically.";
 }
 async function saveBind() {
@@ -767,8 +807,8 @@ function openChooser(refs) {
 /* =====================================================================================
    Sheets
    ===================================================================================== */
-function openSheet(id) { $$(".scrim").forEach(s => { if (s.id !== "pinScrim" && s.id !== id) s.hidden = true; }); $("#" + id).hidden = false; }
-function closeSheets() { $$(".scrim").forEach(s => { if (s.id !== "pinScrim") s.hidden = true; }); bindFor = null; }
+function openSheet(id) { $$(".scrim").forEach(s => { if (s.id !== "pinScrim" && s.id !== "onboard" && s.id !== id) s.hidden = true; }); $("#" + id).hidden = false; }
+function closeSheets() { $$(".scrim").forEach(s => { if (s.id !== "pinScrim" && s.id !== "onboard") s.hidden = true; }); bindFor = null; }
 
 function flip(el, on) { el.setAttribute("aria-checked", on); el.textContent = on ? "ON" : "OFF"; }
 function fillSettings() {
@@ -803,6 +843,7 @@ function fillSettings() {
   flip($("#optSound"), S.opt.sound);
   flip($("#optHaptic"), S.opt.haptic);
   flip($("#optFollow"), S.opt.follow);
+  flip($("#optPlain"), S.opt.plain);
   $("#skinGrid").innerHTML = [{ id: "", name: "Deck's own", sw: ["#2a3238", "#9fd8ff"] }, ...SKINS].map(s =>
     `<button class="skin" type="button" data-skin="${s.id}" aria-pressed="${S.opt.skin === s.id}"><i style="background:linear-gradient(90deg, ${s.sw[0]} 60%, ${s.sw[1]} 60%)"></i>${esc(s.name)}</button>`).join("");
 }
@@ -840,6 +881,9 @@ function wireSettings() {
   $("#bindSave").addEventListener("click", saveBind);
   $("#bindReset").addEventListener("click", resetBind);
   $("#bindTest").addEventListener("click", testBind);
+  $("#bindWire").addEventListener("click", async () => { const d = actDef(bindFor); if (d && d.act) { await wireActions([d.act]); closeSheets(); } });
+  $("#optPlain").addEventListener("click", () => { S.opt.plain = !S.opt.plain; store.set("plain", S.opt.plain); fillSettings(); sound("click"); });
+  $("#replayBtn").addEventListener("click", () => { closeSheets(); ONBOARD.start(true); });
   $("#chooseList").addEventListener("click", e => { const b = e.target.closest("[data-ref]"); if (b) openBind(b.dataset.ref); });
 }
 function setMode(mode) {
@@ -849,6 +893,7 @@ function setMode(mode) {
   $("#keysBtn").setAttribute("aria-pressed", mode === "keys");
   $("#editBtn").setAttribute("aria-pressed", mode === "edit");
   $$(".sw.armed").forEach(el => el.classList.remove("armed"));
+  renderAll();
   if (mode === "keys") readout("Key mode: tap a control to change the key it sends.");
   else if (mode === "play") readout("Ready.");
 }
@@ -909,6 +954,7 @@ async function persistDeck(d) {
   if (S.demo) { saveUserDecks(); return true; }
   const r = await command({ t: "deck_save", deck: d });
   if (!r.ok) { toast(r.err === "offline" ? "Not connected, so the deck wasn't saved on your PC." : `Couldn't save: ${r.err}`, "bad"); return false; }
+  if (S.autobind && S.autobind.consent) { const acts = deckWirable(d); if (acts.length) setTimeout(() => wireActions(acts), 1200); }
   return true;
 }
 

@@ -88,6 +88,7 @@
       <button class="btn primary" id="bindSave" type="button">Save key</button>
       <button class="btn" id="bindTest" type="button">Test</button>
       <button class="btn warn" id="bindReset" type="button">Use game binding</button>
+      <button class="btn primary" id="bindWire" type="button" hidden>Give it a spare key</button>
     </div>
   </div>
 </div>
@@ -159,6 +160,8 @@
       <button class="flip" role="switch" id="optFocus" aria-checked="true" type="button">ON</button></div>
     <div class="toggle-row"><div><b>Switch decks when I board a ship</b><span>Uses the ship's role: mining, salvage, cargo or combat.</span></div>
       <button class="flip" role="switch" id="optFollow" aria-checked="true" type="button">ON</button></div>
+    <div class="toggle-row"><div><b>Plain language</b><span>Leaves out the in-universe flavour text.</span></div>
+      <button class="flip" role="switch" id="optPlain" aria-checked="false" type="button">OFF</button></div>
     <div class="toggle-row"><div><b>Switch sounds</b><span>Clicks, guard snaps and detents.</span></div>
       <button class="flip" role="switch" id="optSound" aria-checked="true" type="button">ON</button></div>
     <div class="toggle-row"><div><b>Vibration</b><span>On phones and tablets that support it.</span></div>
@@ -171,6 +174,7 @@
       <button class="btn" id="resetStates" type="button">Reset all lights</button>
       <button class="btn" id="fullBtn" type="button">Full screen</button>
       <button class="btn" id="repairBtn" type="button" hidden>Pair again</button>
+      <button class="btn" id="replayBtn" type="button">Replay the welcome tour</button>
     </div>
   </div>
 </div>
@@ -275,11 +279,13 @@
   </div>
 </div>
 
+<script src="js/nosleep.js"></script>
 <script src="js/catalog.js"></script>
 <script src="js/decks.js"></script>
 <script src="js/app.js"></script>
 <script src="js/controls.js"></script>
 <script src="js/info.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/onboard.js"></script>
 </body>
 </html>

@@ -75,7 +75,7 @@ const CONTROLS = {
           if (await fire(item.a, el, { label: item.lg })) setState(item.s, next);
         },
         long: () => {
-          sound("snap"); setState(item.s, nextLamp(item));
+          sound("snap"); setState(item.s, nextLamp(item)); emit("resync", item.s);
           toast(`${item.lg} light set to ${lampFor(item)[1].toLowerCase()}. No key sent.`);
         },
       });
@@ -117,7 +117,7 @@ const CONTROLS = {
       const el = makeSw(item, { refs: refsOf(item.a), guard: true });
       bindPress(el, {
         tap: async () => {
-          if (!pick(item.a).keys) return unboundWarn(el, pick(item.a).name);
+          if (!pick(item.a).keys) return unboundWarn(el, pick(item.a).name, pick(item.a).ref);
           if (!el.classList.contains("armed")) {
             sound("snap"); el.classList.add("armed"); CONTROLS.guard.render(item, el.parentElement);
             readout(`<b>${esc(item.lg.toUpperCase())}</b> guard open. Tap again to confirm.`);
@@ -210,7 +210,7 @@ const CONTROLS = {
         try { el.setPointerCapture(e.pointerId); } catch {}
         wake();
         const b1 = pick(item.up), b2 = pick(item.dn);
-        if (!b1.keys || !b2.keys) return unboundWarn(el, !b1.keys ? b1.name : b2.name);
+        if (!b1.keys || !b2.keys) return unboundWarn(el, !b1.keys ? b1.name : b2.name, !b1.keys ? b1.ref : b2.ref);
         drag = { y: e.clientY, moved: false, lightOnly: false };
         drag.lt = setTimeout(() => { if (drag && !drag.moved) { drag.lightOnly = true; el.classList.add("busy"); sound("snap"); toast(`${item.lg}: slide to correct the light. No keys will be sent.`); } }, 650);
       });
@@ -262,7 +262,7 @@ const CONTROLS = {
         if (S.mode !== "play" || e.button > 0) return;
         try { area.setPointerCapture(e.pointerId); } catch {}
         const b1 = pick(item.up), b2 = pick(item.dn);
-        if (!b1.keys || !b2.keys) return unboundWarn(el, !b1.keys ? b1.name : b2.name);
+        if (!b1.keys || !b2.keys) return unboundWarn(el, !b1.keys ? b1.name : b2.name, !b1.keys ? b1.ref : b2.ref);
         d = { x: e.clientX, y: e.clientY, last: ang(e.clientX, e.clientY), acc: 0, moved: false };
       });
       area.addEventListener("pointermove", e => {
@@ -312,7 +312,7 @@ const CONTROLS = {
       });
       const choose = async (o, src) => {
         const b = pick(o.a);
-        if (!b.keys) return unboundWarn(src, b.name);
+        if (!b.keys) return unboundWarn(src, b.name, b.ref);
         if (String(S.states[item.g]) === String(o.val)) return;
         sound("clack");
         if (await fire(o.a, null, { label: `${item.lg}: ${o.lg || o.val}` })) setState(item.g, o.val);
@@ -352,7 +352,9 @@ const CONTROLS = {
         b.classList.toggle("on", known && j === i);
         b.classList.toggle("unbound", !bd.keys);
         b.title = bd.keys ? `${bd.name}: ${fmtKeys(bd.keys)}` : `${bd.name}: no key`;
-        if (S.mode === "keys") b.textContent = bd.keys ? fmtKeys(bd.keys) : "—"; else b.textContent = opts[j].lg || opts[j].val;
+        const lbl = opts[j].lg || opts[j].val;
+        if (S.mode === "keys") b.innerHTML = `${esc(lbl)}<small class="sel-key">${esc(bd.keys ? fmtKeys(bd.keys) : "no key")}</small>`;
+        else b.textContent = lbl;
       });
     },
   },
@@ -390,7 +392,7 @@ const CONTROLS = {
       const at = y => { const r = slot.getBoundingClientRect(); return 1 - (y - r.top - 18) / Math.max(1, r.height - 36); };
       el.addEventListener("pointerdown", e => {
         if (S.mode !== "play" || e.button > 0) return;
-        if (!axisMode() && (!pick(item.up).keys || !pick(item.dn).keys)) return unboundWarn(el, pick(item.up).name);
+        if (!axisMode() && (!pick(item.up).keys || !pick(item.dn).keys)) return unboundWarn(el, pick(item.up).name, pick(item.up).ref);
         try { el.setPointerCapture(e.pointerId); } catch {}
         wake(); d = {}; setP(at(e.clientY));
       });

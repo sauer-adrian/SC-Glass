@@ -12,15 +12,17 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import autobind as ab
 from . import overlay as ov
 from .inputs import DryRunBackend, Keyboard, VJoy
+from .qr import QR
 from .keys import MODIFIERS, parse_keys
-from .starcitizen import CHANNELS, GameLog, Session, find_actionmaps, find_gamelog, parse_actionmaps
+from .starcitizen import CHANNELS, GameLog, Session, find_actionmaps, find_file, find_gamelog, parse_actionmaps
 from .uex import UEX
 from .util import app_dir, log, res_dir
 from .ws import WS, accept_key
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 MAX_HOLD_S = 30.0
 MAX_PULSE_MS = 5000
 DECK_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
@@ -65,6 +67,8 @@ class Hub:
         self.session = Session()
         self.gamelog = GameLog(None)
         self.shipinfo: dict | None = None
+        self.game_running = False
+        self.systest = {"state": "idle"}
         self.load_actionmaps()
 
     # ------------------------------------------------------------------ Star Citizen files
@@ -159,6 +163,125 @@ class Hub:
             return "focus"
         return None
 
+    # ------------------------------------------------------------------ spare keys for unbound actions
+    def ab_cfg(self) -> dict:
+        c = self.cfg.setdefault("autobind", {})
+        for k, v in {"consent": False, "applied": {}, "pending": [], "backup": "", "error": ""}.items():
+            c.setdefault(k, v)
+        return c
+
+    def ab_info(self) -> dict:
+        c = self.ab_cfg()
+        return {"consent": c["consent"], "applied": c["applied"], "pending": c["pending"], "can_undo": bool(c["applied"] or c["pending"] or c["consent"]),
+                "error": c["error"], "game_running": self.game_running, "wirable": sorted(ab.WIRABLE),
+                "profile_found": bool(self.am_path and self.am_path.is_file())}
+
+    async def request_autobind(self, actions: list) -> dict:
+        c = self.ab_cfg()
+        c["consent"] = True
+        for a in actions:
+            if a in ab.WIRABLE and a not in c["pending"] and not (self.am_binds.get(a) or {}).get("keys"):
+                c["pending"].append(a)
+        self.save_cfg(self.cfg)
+        return await self.flush_autobind()
+
+    async def flush_autobind(self) -> dict:
+        c = self.ab_cfg()
+        if not c["pending"]:
+            return {"wired": {}, "pending": []}
+        if not self.am_path or not self.am_path.is_file():
+            c["error"] = "Star Citizen's keybind file isn't there yet. Start the game once; SC Glass finishes this by itself."
+            self.save_cfg(self.cfg)
+            return {"wired": {}, "pending": c["pending"], "error": c["error"]}
+        self.game_running = await asyncio.to_thread(ab.game_running)
+        if self.game_running:
+            return {"wired": {}, "pending": c["pending"], "waiting": True}
+        self.load_actionmaps()
+        assign = ab.plan(c["pending"], self.am_binds, c["applied"])
+        try:
+            if assign:
+                backup = await asyncio.to_thread(ab.write, self.am_path, assign, app_dir() / "backups")
+                if not c["backup"]:
+                    c["backup"] = str(backup)        # the file as it was before SC Glass ever touched it
+                c["applied"].update(assign)
+            c["pending"], c["error"] = [], ""
+        except Exception as e:  # noqa: BLE001
+            c["error"] = f"Couldn't update Star Citizen's keybinds: {e}"
+            log("! " + c["error"])
+        self.save_cfg(self.cfg)
+        self.load_actionmaps()
+        await self.broadcast(self.bindings_msg())
+        await self.broadcast({"t": "autobind", **self.ab_info()})
+        return {"wired": assign, "pending": c["pending"], "error": c["error"]}
+
+    async def undo_autobind(self) -> dict:
+        c = self.ab_cfg()
+        if not self.am_path or not (c["applied"] or c["pending"] or c["consent"]):
+            return {"ok": False, "error": "There's nothing to undo."}
+        if c["applied"]:
+            if await asyncio.to_thread(ab.game_running):
+                return {"ok": False, "error": "Close Star Citizen first; it rewrites its keybinds while running."}
+            await asyncio.to_thread(ab.unwire, self.am_path, dict(c["applied"]), app_dir() / "backups")
+        c.update({"consent": False, "applied": {}, "pending": [], "backup": "", "error": ""})
+        self.save_cfg(self.cfg)
+        self.load_actionmaps()
+        await self.broadcast(self.bindings_msg())
+        await self.broadcast({"t": "autobind", **self.ab_info()})
+        return {"ok": True}
+
+    async def watch_game(self):
+        """Notice Star Citizen starting and stopping; finish pending wiring and re-wire after patch resets."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                running = await asyncio.to_thread(ab.game_running)
+                if running != self.game_running:
+                    self.game_running = running
+                    await self.broadcast({"t": "autobind", **self.ab_info()})
+                if running:
+                    continue
+                c = self.ab_cfg()
+                if c["consent"] and c["applied"] and self.am_path and self.am_path.is_file():
+                    for act, keys in list(c["applied"].items()):
+                        cur = self.am_binds.get(act)
+                        if cur is None and act not in c["pending"]:
+                            c["pending"].append(act)          # a patch reset wiped it
+                        elif cur and cur.get("keys") != keys:
+                            c["applied"].pop(act)             # you changed or cleared it in game; leave it alone
+                if c["pending"]:
+                    await self.flush_autobind()
+            except Exception as e:  # noqa: BLE001
+                log(f"! game watcher: {e}")
+
+    # ------------------------------------------------------------------ commissioning (first run on the PC)
+    def pair_url(self) -> str:
+        return f"http://{lan_addresses()[0]}:{self.cfg['port']}/#pin={self.cfg['pin']}"
+
+    def commission_info(self) -> dict:
+        builds = {}
+        for ch in CHANNELS:
+            gl = find_file(ch, "Game.log")
+            if gl:
+                builds[ch] = str(gl.parent)
+        return {"version": VERSION, "backend": self.backend.name, "platform": sys.platform, "host": socket.gethostname(),
+                "port": self.cfg["port"], "pin": self.cfg["pin"], "ips": lan_addresses(), "url": self.pair_url(),
+                "builds": builds, "channel": self.cfg["channel"], "actionmaps": self.am_info(), "sc": self.am_binds,
+                "gamelog": str(self.gamelog.path or ""), "game": {"ship": self.session.ship, "handle": self.session.handle},
+                "autobind": self.ab_info(), "devices": self.cfg.get("devices", {}),
+                "online": sorted({c.meta.get("client", "deck") for c in self.authed}), "decks": self.load_decks(),
+                "systest": self.systest, "vjoy": self.vjoy.info(), "overlay": ov.available(), "uex_error": self.uex.error}
+
+    async def run_systest(self):
+        self.systest = {"state": "typing", "at": time.time()}
+        await asyncio.sleep(0.9)
+        try:
+            for k in "glass":
+                await self.pulse([k], 40)
+                await asyncio.sleep(0.03)
+            self.systest = {"state": "dry-run" if self.backend.name == "dry-run" else "sent", "at": time.time()}
+        except OSError as e:
+            self.systest = {"state": "blocked", "error": str(e), "at": time.time()}
+
     # ------------------------------------------------------------------ decks
     def load_decks(self) -> list[dict]:
         out = []
@@ -200,7 +323,8 @@ class Hub:
                 "states": self.states, "focus": self.focused(), "decks": self.load_decks(),
                 "game": self.game_info(), "vjoy": self.vjoy.info(),
                 "overlay": {"available": ov.available(), "running": self.overlay.running(), "monitors": ov.monitors()},
-                "settings": {"require_focus": self.cfg["require_focus"], "channel": self.cfg["channel"]}}
+                "settings": {"require_focus": self.cfg["require_focus"], "channel": self.cfg["channel"]},
+                "autobind": self.ab_info(), "host": socket.gethostname()}
 
     async def broadcast(self, obj, skip=None):
         for c in list(self.authed):
@@ -316,6 +440,8 @@ class Hub:
         if str(m.get("pin", "")) == self.cfg["pin"]:
             self.authed.add(ws)
             ws.meta["client"] = str(m.get("client", "deck"))[:40]
+            self.cfg.setdefault("devices", {})[ws.meta["client"]] = int(time.time())
+            self.save_cfg(self.cfg)
             await ws.send(self.welcome())
             log(f"  {ws.peer} paired ({ws.meta['client']})")
         else:
@@ -434,6 +560,12 @@ class Hub:
                 return await ack(False, err=err)
             asyncio.get_running_loop().run_in_executor(None, self.overlay.harden, mon)
             return await ack()
+        if t == "autobind":
+            res = await self.request_autobind([str(a) for a in m.get("actions", [])][:40])
+            return await ack(True, **res)
+        if t == "autobind_undo":
+            res = await self.undo_autobind()
+            return await ack(res["ok"], err=res.get("error", ""))
         if t == "overlay_close":
             self.overlay.close()
             return await ack()
@@ -470,8 +602,18 @@ class Hub:
             await self.session_loop(WS(reader, writer, peer))
             writer.close()
             return
+        if method == "POST":
+            return await self.handle_post(reader, writer, path, hdrs, local)
         if method != "GET":
             return await self.respond(writer, 405, b"Method not allowed", "text/plain")
+        if path == "/api/commission":
+            if not local:
+                return await self.respond(writer, 403, b"Only on this PC.", "text/plain")
+            return await self.respond(writer, 200, json.dumps(self.commission_info()).encode(), "application/json")
+        if path == "/api/qr.svg":
+            if not local:
+                return await self.respond(writer, 403, b"Only on this PC.", "text/plain")
+            return await self.respond(writer, 200, QR(self.pair_url()).svg().encode(), "image/svg+xml")
         if path == "/api/info":
             return await self.respond(writer, 200, json.dumps({"app": "sc-glass", "version": VERSION}).encode(), "application/json")
         if path == "/api/pair":
@@ -483,8 +625,8 @@ class Hub:
             return await self.respond(writer, 200, body, "application/json")
         if path in ("/", ""):
             path = "/index.html"
-        if path == "/pair":
-            path = "/pair.html"
+        if path in ("/pair", "/commission", "/setup"):
+            path = "/commission.html"
         f = (self.web / path.lstrip("/")).resolve()
         if self.web.resolve() not in f.parents or not f.is_file():
             return await self.respond(writer, 404, b"Not found", "text/plain")
@@ -495,8 +637,39 @@ class Hub:
             ctype = "text/javascript"
         await self.respond(writer, 200, f.read_bytes(), ctype)
 
+    async def handle_post(self, reader, writer, path, hdrs, local):
+        """Commissioning actions from the page on this PC. A custom header plus an Origin check keep other
+        websites in your browser from triggering them."""
+        origin = hdrs.get("origin", "")
+        same = not origin or origin.startswith(("http://localhost:", "http://127.0.0.1:"))
+        if not local or hdrs.get("x-sc-glass") != "1" or not same:
+            return await self.respond(writer, 403, b"Forbidden", "text/plain")
+        try:
+            n = min(int(hdrs.get("content-length", "0") or 0), 65536)
+            body = json.loads((await reader.readexactly(n)).decode() or "{}") if n else {}
+        except (ValueError, asyncio.IncompleteReadError):
+            return await self.respond(writer, 400, b"Bad request", "text/plain")
+        if path == "/api/autobind":
+            res = await self.request_autobind([str(a) for a in body.get("actions", [])][:40])
+        elif path == "/api/autobind/undo":
+            res = await self.undo_autobind()
+        elif path == "/api/systest":
+            asyncio.create_task(self.run_systest())
+            res = {"ok": True}
+        elif path == "/api/settings":
+            if body.get("channel") in CHANNELS:
+                self.cfg["channel"] = body["channel"]
+                self.cfg["actionmaps_path"] = self.cfg["gamelog_path"] = ""
+                self.load_actionmaps()
+                self.open_gamelog()
+                self.save_cfg(self.cfg)
+            res = {"ok": True}
+        else:
+            return await self.respond(writer, 404, b"Not found", "text/plain")
+        await self.respond(writer, 200, json.dumps(res).encode(), "application/json")
+
     async def respond(self, writer, code, body: bytes, ctype):
-        reason = {200: "OK", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed"}.get(code, "OK")
+        reason = {200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed"}.get(code, "OK")
         if ctype.startswith("text/") or ctype.endswith(("json", "javascript")):
             ctype += "; charset=utf-8"
         writer.write((f"HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\n"
@@ -519,17 +692,24 @@ class Hub:
         for ip in ips:
             print(f"      http://{ip}:{port}")
         print(f"\n  Pairing PIN:  {self.cfg['pin']}")
-        print(f"  QR code:      http://localhost:{port}/pair" + ("   (opening now)" if self.open_browser else ""))
+        first = not self.cfg.get("devices")
+        print(f"  Setup page:   http://localhost:{port}/setup" + ("   (opening now)" if self.open_browser and first else ""))
         am = self.am_info()
         print("\n  Keybinds:     " + (f"{am['count']} rebinds from your Star Citizen profile" if not am["error"]
                                      else f"{am['error']}, using game defaults"))
         print("  Game.log:     " + (str(self.gamelog.path) if self.gamelog.path else "not found yet"))
         print("  vJoy:         " + ("device %d ready" % self.vjoy.device if self.vjoy.ok else self.vjoy.error))
         print(f"  Keys only go to Star Citizen when it's in front: {'yes' if self.cfg['require_focus'] else 'no'}")
-        print(f"{bar}\n  Ctrl+C to quit.\n")
-        if self.open_browser:
+        print(bar)
+        try:
+            print("\n  Scan with your tablet's camera:\n")
+            print("\n".join("    " + line for line in QR(self.pair_url()).text().splitlines()))
+        except (UnicodeEncodeError, ValueError):
+            pass
+        print(f"\n{bar}\n  Ctrl+C to quit.\n")
+        if self.open_browser and first:
             try:
-                webbrowser.open(f"http://localhost:{port}/pair")
+                webbrowser.open(f"http://localhost:{port}/setup")
             except Exception:  # noqa: BLE001
                 pass
         async def warm():
@@ -537,7 +717,7 @@ class Hub:
             await self.lookup_ship()
             if self.shipinfo:
                 await self.broadcast({"t": "game", "ev": {"type": "ship_info", "data": {}}, "game": self.game_info()})
-        bg = [asyncio.create_task(c) for c in (self.worker(), self.watch_files(), self.watch_focus(), warm())]
+        bg = [asyncio.create_task(c) for c in (self.worker(), self.watch_files(), self.watch_focus(), self.watch_game(), warm())]
         try:
             async with server:
                 await server.serve_forever()

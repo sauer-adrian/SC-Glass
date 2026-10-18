@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SC Glass Setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612:wght@400;700&family=B612+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="css/deck.css">
+<style>
+/* Commissioning: a live pre-flight checklist on the left, the pairing plate on the right. */
+body { overflow: auto; display: block; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 40px; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); }
+.top { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+.top .t { flex: 1; min-width: 260px; }
+.eyebrow { font: 700 11px var(--font); letter-spacing: .24em; color: var(--engrave); text-transform: uppercase; }
+h1 { margin: 6px 0 4px; font-size: 28px; color: var(--lit); letter-spacing: .01em; text-wrap: balance; }
+.lore { color: var(--engrave); font-size: 14px; max-width: 60ch; margin: 0; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+.check { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.item { display: grid; grid-template-columns: 40px 1fr; gap: 14px; padding: 16px 18px; border-radius: 10px;
+  background: linear-gradient(var(--plate-hi), var(--plate)); box-shadow: 0 0 0 1px #000, inset 0 1px 0 var(--plate-edge); }
+.lampb { width: 26px; height: 26px; border-radius: 50%; margin-top: 2px; background: var(--dim); box-shadow: inset 0 2px 4px rgba(0,0,0,.6), 0 0 0 3px var(--bezel); }
+.item[data-s="ok"] .lampb { background: var(--green); box-shadow: 0 0 14px var(--green), 0 0 0 3px var(--bezel); }
+.item[data-s="warn"] .lampb { background: var(--amber); box-shadow: 0 0 14px var(--amber), 0 0 0 3px var(--bezel); }
+.item[data-s="bad"] .lampb { background: var(--red); box-shadow: 0 0 14px var(--red), 0 0 0 3px var(--bezel); }
+.item[data-s="busy"] .lampb { background: var(--amber); animation: blink 1s steps(2) infinite; }
+.item h2 { margin: 0; font-size: 16px; color: var(--lit); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.item h2 small { font: 700 10px var(--mono); letter-spacing: .14em; color: var(--engrave); text-transform: uppercase; }
+.item p { margin: 6px 0 0; color: var(--ink); font-size: 14px; max-width: 64ch; }
+.item .meta { font: 12.5px var(--mono); color: var(--ice); margin-top: 6px; overflow-wrap: anywhere; }
+.item .row { margin-top: 12px; }
+.chiplist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chiplist span { font: 700 11px var(--mono); padding: 4px 7px; border-radius: 4px; background: var(--well); box-shadow: inset 0 0 0 1px var(--well-line); color: var(--ink); }
+.chiplist span b { color: var(--ice); font-weight: 700; margin-left: 4px; }
+.plate { position: sticky; top: 20px; padding: 22px; border-radius: 12px; text-align: center;
+  background: linear-gradient(var(--plate-hi), var(--plate)); box-shadow: 0 0 0 1px #000, inset 0 1px 0 var(--plate-edge), 0 10px 30px rgba(0,0,0,.4); }
+.plate h2 { margin: 0 0 4px; font-size: 18px; color: var(--lit); }
+.plate p { margin: 4px auto; color: var(--ink); font-size: 14px; max-width: 40ch; }
+.qr { display: block; margin: 16px auto 12px; width: min(300px, 100%); aspect-ratio: 1; border-radius: 10px; background: #fff; padding: 10px; }
+.pin { font: 700 34px/1 var(--mono); letter-spacing: .2em; color: var(--ice); margin: 10px 0 4px; }
+.url { font: 13px var(--mono); color: var(--lit); overflow-wrap: anywhere; }
+.linked { margin-top: 14px; font: 700 13px var(--mono); color: var(--green); min-height: 1.4em; }
+.done { margin-top: 18px; padding: 18px 20px; border-radius: 10px; display: none; gap: 14px; align-items: center;
+  background: color-mix(in srgb, var(--green) 10%, var(--plate)); box-shadow: 0 0 0 1px #000, inset 0 0 0 1px color-mix(in srgb, var(--green) 50%, transparent); }
+.done.show { display: flex; }
+.done b { display: block; color: var(--green); font-size: 17px; }
+.done span { color: var(--ink); font-size: 14px; }
+.probe { position: absolute; opacity: 0; pointer-events: none; }
+.typed { font: 700 18px var(--mono); letter-spacing: .3em; color: var(--green); margin-left: 6px; }
+.plainbtn { flex: none; }
+select { max-width: 280px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="t">
+      <div class="eyebrow" data-lore="Glass cockpit retrofit · commissioning log" data-plain="SC Glass setup"></div>
+      <h1 data-lore="Let's get your rig commissioned" data-plain="Let's set up SC Glass"></h1>
+      <p class="lore" data-lore="Aftermarket avionics for your UEE-registered rig, SEY 2956. Most checks run themselves; one needs your say-so." data-plain="Most checks run by themselves. One asks for your OK."></p>
+    </div>
+    <button class="btn plainbtn" id="plainBtn" type="button"></button>
+  </div>
+
+  <div class="cols">
+    <ol class="check">
+      <li class="item" id="c-hangar" data-s="busy"><span class="lampb"></span><div>
+        <h2><span data-lore="Hangar records" data-plain="Find Star Citizen"></span><small>auto</small></h2>
+        <p class="txt">Looking for your Star Citizen install…</p><div class="meta"></div>
+        <div class="row" hidden><label for="chan">Game build </label><select id="chan"></select></div></div></li>
+
+      <li class="item" id="c-profile" data-s="busy"><span class="lampb"></span><div>
+        <h2><span data-lore="Control profile" data-plain="Read your keybinds"></span><small>auto</small></h2>
+        <p class="txt">Reading your keybinds…</p><div class="meta"></div></div></li>
+
+      <li class="item" id="c-spare" data-s="busy"><span class="lampb"></span><div>
+        <h2><span data-lore="Spare circuits" data-plain="Keys for unbound controls"></span><small>your OK</small></h2>
+        <p class="txt">Checking which deck controls have no key…</p>
+        <div class="chiplist"></div>
+        <div class="row"><button class="btn primary" id="wireBtn" type="button" hidden>Give them keys</button>
+          <button class="btn warn" id="undoBtn" type="button" hidden>Undo</button></div></div></li>
+
+      <li class="item" id="c-comms" data-s="busy"><span class="lampb"></span><div>
+        <h2><span data-lore="Comms link" data-plain="Tablet connection"></span><small>auto</small></h2>
+        <p class="txt">Waiting for a display to connect.</p><div class="meta"></div></div></li>
+
+      <li class="item" id="c-test" data-s=""><span class="lampb"></span><div>
+        <h2><span data-lore="Systems check" data-plain="Test key presses"></span><small>optional</small></h2>
+        <p class="txt">Sends a few harmless key presses to this page to prove input reaches your PC. Star Citizen doesn't need to be running.</p>
+        <div class="row"><button class="btn" id="testBtn" type="button">Run the check</button><span class="typed" id="typed"></span></div>
+        <input class="probe" id="probe" aria-hidden="true" tabindex="-1"></div></li>
+    </ol>
+
+    <aside class="plate">
+      <h2 data-lore="Pair a display" data-plain="Connect your tablet or phone"></h2>
+      <p>Open the camera on your tablet or phone and point it here. Same Wi-Fi as this PC.</p>
+      <img class="qr" id="qr" alt="QR code that opens the deck on your tablet">
+      <div class="eyebrow">Or type</div>
+      <div class="url" id="url">…</div>
+      <div class="eyebrow" style="margin-top:10px">PIN</div>
+      <div class="pin" id="pin">······</div>
+      <div class="linked" id="linked"></div>
+    </aside>
+  </div>
+
+  <div class="done" id="done"><span class="lampb" style="background:var(--green);box-shadow:0 0 14px var(--green),0 0 0 3px var(--bezel);width:26px;height:26px;border-radius:50%;flex:none"></span>
+    <div><b data-lore="All systems nominal. Clear skies, Citizen." data-plain="All set."></b>
+    <span>You can close this page. SC Glass keeps running, and your tablet reconnects by itself next time.</span></div></div>
+</div>
+
+<script src="js/catalog.js"></script>
+<script src="js/decks.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+let plain = false, last = null, wireBusy = false, testState = "idle";
+try { plain = localStorage.getItem("scg.plain") === "true"; } catch {}
+const HDRS = { "X-SC-Glass": "1", "Content-Type": "application/json" };
+const post = (p, body) => fetch(p, { method: "POST", headers: HDRS, body: JSON.stringify(body || {}) }).then(r => r.json());
+
+function applyVoice() {
+  document.querySelectorAll("[data-lore]").forEach(el => el.textContent = plain ? el.dataset.plain : el.dataset.lore);
+  $("#plainBtn").textContent = plain ? "Add the flavour back" : "Plain language";
+}
+$("#plainBtn").addEventListener("click", () => { plain = !plain; try { localStorage.setItem("scg.plain", plain); } catch {} applyVoice(); if (last) render(last); });
+applyVoice();
+
+function set(id, s, txt, meta) {
+  const el = $("#" + id); el.dataset.s = s;
+  if (txt !== undefined) el.querySelector(".txt").textContent = txt;
+  if (meta !== undefined) { const m = el.querySelector(".meta"); if (m) m.textContent = meta; }
+}
+
+/* deck controls that use an action Star Citizen leaves unbound */
+function neededActions(d) {
+  const refs = new Set();
+  const add = r => (Array.isArray(r) ? r : [r]).forEach(x => x && typeof x === "string" && !x.startsWith("keys:") && refs.add(x));
+  for (const deck of [...BUILTIN_DECKS, ...(d.decks || [])])
+    for (const p of deck.pages || []) for (const pn of p.panels || []) for (const it of pn.items || []) {
+      add(it.a); add(it.dn); add(it.up);
+      if (Array.isArray(it.opts)) it.opts.forEach(o => add(o.a));
+      if (Array.isArray(it.steps)) it.steps.forEach(s => add(s.a));
+    }
+  const out = [];
+  for (const id of refs) {
+    const def = A[id]; if (!def || def[1]) continue;
+    const act = def[0];
+    if (!d.autobind.wirable.includes(act)) continue;
+    const cur = d.sc[act];
+    out.push({ id, act, name: def[3], keys: cur && cur.keys ? cur.keys : d.autobind.applied[act] || "" });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+const fmt = k => k.split("+").map(t => ({ rctrl: "RCtrl", lctrl: "LCtrl", ralt: "RAlt", lalt: "LAlt" }[t] || (t.startsWith("np_") ? "Num" + t.slice(3) : t.toUpperCase()))).join("+");
+
+function render(d) {
+  // hangar
+  const builds = Object.entries(d.builds || {});
+  if (d.gamelog || builds.length) {
+    const where = d.builds[d.channel] || (d.gamelog ? d.gamelog.replace(/[\\/]Game\.log$/, "") : builds[0][1]);
+    set("c-hangar", "ok", plain ? `Found Star Citizen ${d.channel}.` : `Found your ${d.channel} hangar.`, where);
+  } else {
+    set("c-hangar", "warn", "Star Citizen hasn't been found yet. Launch it once and this check completes by itself.", "");
+  }
+  const row = $("#c-hangar .row");
+  row.hidden = builds.length < 2;
+  if (builds.length > 1 && $("#chan").options.length !== builds.length) {
+    $("#chan").innerHTML = builds.map(([c]) => `<option${c === d.channel ? " selected" : ""}>${c}</option>`).join("");
+  }
+  // profile
+  const am = d.actionmaps || {};
+  if (am.error) set("c-profile", "ok", "No custom keybinds yet, so the deck uses Star Citizen's defaults. Change a key in the game and the deck follows.", "");
+  else set("c-profile", "ok", `${am.count} of your own keybinds loaded. Change one in the game and the deck follows within seconds.`, am.path);
+  // spare circuits
+  const ab = d.autobind, need = neededActions(d), missing = need.filter(n => !n.keys);
+  const chips = $("#c-spare .chiplist");
+  chips.innerHTML = need.map(n => `<span>${n.name}${n.keys ? `<b>${fmt(n.keys)}</b>` : ""}</span>`).join("");
+  $("#wireBtn").hidden = !missing.length || ab.pending.length > 0 || wireBusy;
+  $("#undoBtn").hidden = !ab.can_undo || ab.game_running;
+  if (ab.error) set("c-spare", "warn", ab.error);
+  else if (ab.pending.length && ab.game_running) set("c-spare", "busy", `Waiting for you to close Star Citizen. It saves its keybinds when it exits, so SC Glass adds the ${ab.pending.length} keys right after.`);
+  else if (ab.pending.length) set("c-spare", "busy", "Adding keys…");
+  else if (missing.length) set("c-spare", "warn", `${missing.length} deck controls have no key in Star Citizen. SC Glass can give each a spare key (Right Ctrl + F1–F12, unused by the game). Your own keys stay exactly as they are, and Undo removes the spare keys again.`);
+  else if (Object.keys(ab.applied).length) set("c-spare", "ok", `Every deck control has a key. SC Glass added ${Object.keys(ab.applied).length} and re-adds them if a patch resets your keybinds.`);
+  else set("c-spare", "ok", "Every deck control already has a key.");
+  // comms + pairing
+  const nice = n => n === "deck" ? "A display" : n;
+  const online = (d.online || []).map(nice), known = Object.keys(d.devices || {}).map(nice);
+  if (online.length) set("c-comms", "ok", `${online.join(", ")} connected.`, d.ips.join("  ·  "));
+  else if (known.length) set("c-comms", "warn", `Waiting for ${known.join(" or ")} to reconnect. Open the deck on it, same Wi-Fi as this PC.`, d.ips.join("  ·  "));
+  else set("c-comms", "busy", "Waiting for a display. If Windows asks whether SC Glass may use the network, choose Allow for private networks.", d.ips.join("  ·  "));
+  $("#url").textContent = d.url.replace(/#pin=\d+$/, "");
+  $("#pin").textContent = d.pin;
+  if (!last || last.url !== d.url) $("#qr").src = "/api/qr.svg?u=" + encodeURIComponent(d.url);
+  $("#linked").textContent = online.length ? (plain ? `Connected: ${online.join(", ")}` : `Display linked: ${online.join(", ")}`) : "";
+  // systems check
+  const st = d.systest || {};
+  if (testState === "waiting" && st.state === "dry-run") { testState = "dry"; set("c-test", "warn", "This PC runs SC Glass in dry-run mode, so nothing is typed. On Windows the check types GLASS here."); }
+  if (testState === "waiting" && st.state === "blocked") { testState = "bad"; set("c-test", "bad", `Windows blocked the key presses: ${st.error}`); }
+  // done
+  const ok = ["c-hangar", "c-profile", "c-comms"].every(id => $("#" + id).dataset.s === "ok") && $("#c-spare").dataset.s !== "warn";
+  $("#done").classList.toggle("show", ok);
+  last = d;
+}
+
+async function poll() {
+  try { render(await (await fetch("/api/commission", { cache: "no-store" })).json()); }
+  catch { set("c-comms", "bad", "Lost contact with SC Glass. Is it still running?"); }
+}
+$("#wireBtn").addEventListener("click", async () => {
+  if (!last) return;
+  wireBusy = true; $("#wireBtn").hidden = true; set("c-spare", "busy", "Adding keys…");
+  const acts = neededActions(last).filter(n => !n.keys).map(n => n.act);
+  const r = await post("/api/autobind", { actions: acts });
+  wireBusy = false;
+  if (r.waiting) set("c-spare", "busy", "Waiting for you to close Star Citizen. The keys go in right after it exits.");
+  poll();
+});
+$("#undoBtn").addEventListener("click", async () => {
+  const r = await post("/api/autobind/undo");
+  if (!r.ok) set("c-spare", "warn", r.error);
+  poll();
+});
+$("#chan").addEventListener("change", e => post("/api/settings", { channel: e.target.value }).then(poll));
+
+/* systems check: the companion types "glass" while this page has focus */
+let typed = "";
+document.addEventListener("keydown", e => {
+  if (testState !== "waiting" || e.key.length !== 1) return;
+  typed += e.key.toLowerCase(); $("#typed").textContent = typed.toUpperCase();
+  if (typed.endsWith("glass")) {
+    testState = "ok";
+    set("c-test", "ok", plain ? "Key presses arrive. Input works." : "Input path clear: SC Glass pressed G-L-A-S-S and this PC received every key.");
+  }
+});
+$("#testBtn").addEventListener("click", async () => {
+  typed = ""; $("#typed").textContent = ""; testState = "waiting";
+  set("c-test", "busy", "Typing a test word into this page. Keep this window in front…");
+  $("#probe").focus();
+  await post("/api/systest");
+  setTimeout(() => { if (testState === "waiting") { testState = "bad"; set("c-test", "bad", "Nothing arrived. Keep this page in front and try again. If it still fails and Star Citizen runs as administrator, run SC Glass as administrator too."); } }, 4500);
+});
+poll(); setInterval(poll, 1500);
+</script>
+</body>
+</html>

@@ -66,6 +66,16 @@ def main():
         cfg["gamelog_path"] = a.gamelog
     save_config(cfg)
 
+    if sys.platform == "win32":
+        try:   # let the console show the pairing QR code
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except (OSError, AttributeError):
+            pass
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     backend = make_backend(a.dry_run)
     vjoy = VJoy(int(cfg.get("vjoy_device", 1)))
     hub = Hub(cfg, save_config, backend, vjoy, open_browser=not a.no_browser)

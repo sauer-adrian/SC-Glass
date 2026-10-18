@@ -90,5 +90,51 @@ class Engine(unittest.TestCase):
         self.assertEqual(pressed, ["vlalt", "vn", "^n", "^lalt", "vo", "^o"])
 
 
+class SpareKeys(unittest.TestCase):
+    def test_wire_and_undo(self):
+        from glass import autobind as ab
+        xml = """<ActionMaps><ActionProfiles profileName="default">
+          <actionmap name="seat_general"><action name="v_set_scan_mode"><rebind input="kb1_rctrl+f1"/></action></actionmap>
+          <actionmap name="spaceship_general"><action name="v_toggle_all_doors"><rebind input="kb1_ "/></action></actionmap>
+          </ActionProfiles></ActionMaps>"""
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "actionmaps.xml"); p.write_text(xml)
+            cur = parse_actionmaps(p)
+            plan = ab.plan(["v_set_guns_mode", "v_set_scan_mode", "v_toggle_all_doors", "v_flightready"], cur, {})
+            # scan mode is already bound (and owns rctrl+f1), flight ready has a default key: neither is touched
+            self.assertEqual(plan, {"v_set_guns_mode": "rctrl+f2", "v_toggle_all_doors": "rctrl+f3"})
+            backup = ab.write(p, plan, Path(d, "backups"))
+            after = parse_actionmaps(p)
+            self.assertEqual(after["v_set_guns_mode"]["keys"], "rctrl+f2")
+            self.assertEqual(after["v_toggle_all_doors"]["keys"], "rctrl+f3")
+            self.assertEqual(after["v_set_scan_mode"]["keys"], "rctrl+f1")
+            # Undo removes only our keys: a bind the player added afterwards survives
+            t = p.read_text().replace('<actionmap name="seat_general">',
+                                      '<actionmap name="seat_general">\n  <action name="v_set_quantum_mode"><rebind input="kb1_f9"/></action>')
+            p.write_text(t)
+            self.assertEqual(ab.unwire(p, plan, Path(d, "backups")), 3)   # doors live in two action maps
+            after = parse_actionmaps(p)
+            self.assertFalse(after.get("v_set_guns_mode", {}).get("keys"))
+            self.assertFalse(after.get("v_toggle_all_doors", {}).get("keys"))
+            self.assertEqual(after["v_set_scan_mode"]["keys"], "rctrl+f1")
+            self.assertEqual(after["v_set_quantum_mode"]["keys"], "f9")
+            ab.restore(p, backup)
+            self.assertEqual(p.read_text(), xml)
+
+    def test_pool_is_safe(self):
+        from glass import autobind as ab
+        self.assertFalse([k for k in ab.SPARE_KEYS if "alt" in k], "Alt+F4 would close the game")
+
+
+class QRCodes(unittest.TestCase):
+    def test_structure(self):
+        from glass.qr import QR
+        q = QR("http://192.168.1.20:8710/#pin=123456")
+        self.assertEqual(q.size, 29)                              # version 3
+        self.assertTrue(q.modules[0][0] and q.modules[6][6] and not q.modules[1][1])   # finder pattern
+        self.assertTrue(q.modules[q.size - 8][8])                 # dark module
+        self.assertIn("<svg", q.svg())
+
+
 if __name__ == "__main__":
     unittest.main()
