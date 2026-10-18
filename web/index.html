@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SC Glass</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#121618">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SC Glass">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612:wght@400;700&family=B612+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="css/deck.css">
+</head>
+<body>
+<header class="bar">
+  <button class="deckchip" id="deckChip" type="button" aria-label="Choose deck">
+    <span class="brand">SC GLASS</span>
+    <span class="dname" id="deckName">Standard</span>
+    <span class="dship" id="deckShip"></span>
+  </button>
+  <nav class="tabs" role="tablist" aria-label="Pages" id="tabsTop"></nav>
+  <div class="status">
+    <span class="lamp" id="linkLamp" data-s="wait"><i></i><b id="linkText">LINKING</b></span>
+    <span class="lamp" id="focusLamp" hidden><i></i><b id="focusText">GAME</b></span>
+    <button class="tool" id="keysBtn" aria-pressed="false" title="Change which key a control sends">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+      <span class="lbl">KEYS</span>
+    </button>
+    <button class="tool" id="editBtn" aria-pressed="false" title="Edit this deck's layout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg>
+      <span class="lbl">EDIT</span>
+    </button>
+    <button class="tool" id="setBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+    </button>
+  </div>
+</header>
+<div class="editbar" role="toolbar" aria-label="Layout editor">
+  <span class="msg" id="editMsg"></span>
+  <button class="btn" id="edUndo" type="button">Undo</button>
+  <button class="btn" id="edRedo" type="button">Redo</button>
+  <button class="btn" id="edPages" type="button">Pages</button>
+  <button class="btn" id="edDeck" type="button">Deck settings</button>
+  <button class="btn warn" id="edDiscard" type="button">Discard</button>
+  <button class="btn primary" id="edDone" type="button">Done</button>
+</div>
+
+<main id="deck">
+  <p class="bindhint">Tap any control to change the key it sends. Tap KEYS again when you're done.</p>
+</main>
+
+<footer class="readout" aria-live="polite">
+  <span class="r-main" id="readout">Ready.</span>
+  <span class="r-lat" id="latency"></span>
+</footer>
+<nav class="tabs-bottom" role="tablist" aria-label="Pages" id="tabsBottom"></nav>
+<div class="toast" id="toast" role="status"></div>
+
+<!-- key binding -->
+<div class="scrim" id="bindScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="bindTitle">
+    <div class="sheet-head"><div><h2 id="bindTitle">Landing gear</h2><div class="sub" id="bindAction"></div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div id="bindKeys" class="keyed">
+      <div class="keycaps"></div>
+      <span class="src" id="bindSrc"></span>
+      <h3>Modifiers</h3>
+      <div class="chips k-mods"></div>
+      <div class="field"><label for="bindKeySel">Key, mouse or joystick button</label><select id="bindKeySel" class="k-sel"></select></div>
+      <div class="field"><label for="bindModeSel">How it's pressed</label>
+        <select id="bindModeSel" class="k-mode">
+          <option value="tap">Tap (quick press)</option><option value="press">Press</option>
+          <option value="long:300">Short hold, 0.3 s</option><option value="long:450">Hold, 0.45 s</option>
+          <option value="long:750">Hold, 0.75 s</option><option value="long:1000">Hold, 1 s</option>
+          <option value="long:1800">Long hold, 1.8 s</option><option value="dtap">Double tap</option>
+          <option value="hold">Held while you touch the control</option>
+        </select></div>
+    </div>
+    <p class="muted" id="bindNote"></p>
+    <div class="row">
+      <button class="btn primary" id="bindSave" type="button">Save key</button>
+      <button class="btn" id="bindTest" type="button">Test</button>
+      <button class="btn warn" id="bindReset" type="button">Use game binding</button>
+    </div>
+  </div>
+</div>
+
+<!-- which action of a multi-action control -->
+<div class="scrim" id="chooseScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="chooseTitle">
+    <div class="sheet-head"><div><h2 id="chooseTitle">Which key?</h2><div class="sub">This control sends more than one action.</div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="list" id="chooseList" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<!-- decks -->
+<div class="scrim" id="deckScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="deckTitle">
+    <div class="sheet-head"><div><h2 id="deckTitle">Decks</h2><div class="sub" id="deckSub"></div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="list" id="deckList" style="margin-top:14px"></div>
+    <div class="row">
+      <button class="btn primary" id="deckEdit" type="button">Edit layout</button>
+      <button class="btn" id="deckDup" type="button">Duplicate</button>
+      <button class="btn" id="deckShare" type="button">Share code</button>
+      <button class="btn" id="deckImport" type="button">Import code</button>
+      <button class="btn danger" id="deckDelete" type="button">Delete this deck</button>
+    </div>
+    <p class="muted" style="margin-top:14px">When you board a ship, the deck switches to the one that fits it: mining ships get Mining, fighters get Fighter. Pick a different deck while aboard and it's remembered for that ship.</p>
+  </div>
+</div>
+<div class="scrim" id="shareScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+    <div class="sheet-head"><div><h2 id="shareTitle">Share</h2><div class="sub" id="shareMode">A deck code holds the whole layout. It doesn't include your keybinds.</div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="field"><label for="shareCode">Deck code</label><textarea id="shareCode" spellcheck="false"></textarea></div>
+    <div class="row"><button class="btn primary" id="shareGo" type="button">Copy code</button></div>
+  </div>
+</div>
+
+<!-- settings -->
+<div class="scrim" id="setScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <div class="sheet-head"><div><h2 id="setTitle">Settings</h2><div class="sub" id="setSub"></div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div id="demoInfo" hidden>
+      <h3>Connect to your PC</h3>
+      <p>This is a demo. Controls light up and show what they would press, but nothing reaches a game. The ship and session panels show example data.</p>
+      <ol class="steps">
+        <li>On the gaming PC, run <code>SCGlass.exe</code> or <code>start.bat</code>.</li>
+        <li>On this tablet, scan the QR code it shows, or open the address it prints, on the same Wi-Fi.</li>
+        <li>Enter the 6-digit PIN once. Keep Star Citizen as the active window while you play.</li>
+      </ol>
+    </div>
+    <div id="liveInfo" hidden>
+      <h3>Link</h3><dl class="kv" id="linkKv"></dl>
+      <h3>Star Citizen files</h3><dl class="kv" id="amKv"></dl>
+      <div class="field"><label for="chanSel">Game build</label>
+        <select id="chanSel"><option>LIVE</option><option>PTU</option><option>EPTU</option><option>TECH-PREVIEW</option><option>HOTFIX</option></select></div>
+      <div class="row"><button class="btn" id="reloadBtn" type="button">Reload from the game</button></div>
+      <h3>Analog controls</h3><dl class="kv" id="vjoyKv"></dl>
+      <div id="overlayBox" hidden>
+        <h3>Deck on a PC touchscreen</h3>
+        <p class="muted">Opens this deck full screen on a second monitor, like a Xeneon Edge. Touches there don't pull focus from Star Citizen.</p>
+        <div class="field"><label for="monSel">Screen</label><select id="monSel"></select></div>
+        <div class="row"><button class="btn primary" id="ovOpen" type="button">Open on that screen</button><button class="btn" id="ovClose" type="button">Close it</button></div>
+      </div>
+    </div>
+    <h3>Behaviour</h3>
+    <div class="toggle-row" id="focusRow"><div><b>Only press keys while Star Citizen is in front</b><span>Stops taps from typing into other windows on your PC.</span></div>
+      <button class="flip" role="switch" id="optFocus" aria-checked="true" type="button">ON</button></div>
+    <div class="toggle-row"><div><b>Switch decks when I board a ship</b><span>Uses the ship's role: mining, salvage, cargo or combat.</span></div>
+      <button class="flip" role="switch" id="optFollow" aria-checked="true" type="button">ON</button></div>
+    <div class="toggle-row"><div><b>Switch sounds</b><span>Clicks, guard snaps and detents.</span></div>
+      <button class="flip" role="switch" id="optSound" aria-checked="true" type="button">ON</button></div>
+    <div class="toggle-row"><div><b>Vibration</b><span>On phones and tablets that support it.</span></div>
+      <button class="flip" role="switch" id="optHaptic" aria-checked="true" type="button">ON</button></div>
+    <h3>Skin on this device</h3>
+    <div class="skins" id="skinGrid"></div>
+    <h3>Switch lights</h3>
+    <p class="muted">Lights show what the deck last sent, corrected by Star Citizen's log when you board a ship or restart. If one is wrong, press and hold that control for a second to correct it without sending a key.</p>
+    <div class="row">
+      <button class="btn" id="resetStates" type="button">Reset all lights</button>
+      <button class="btn" id="fullBtn" type="button">Full screen</button>
+      <button class="btn" id="repairBtn" type="button" hidden>Pair again</button>
+    </div>
+  </div>
+</div>
+
+<!-- editor: control -->
+<div class="scrim" id="itemScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="itemTitle">
+    <div class="sheet-head"><div><h2 id="itemTitle">Control</h2><div class="sub" id="itemSub"></div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div id="itemForm"></div>
+    <h3>Arrange</h3>
+    <div class="row" id="itemOps" style="margin-top:0">
+      <button class="btn small" data-op="left" type="button">◀ Earlier</button>
+      <button class="btn small" data-op="right" type="button">Later ▶</button>
+      <button class="btn small" data-op="dup" type="button">Duplicate</button>
+      <button class="btn small danger" data-op="delete" type="button">Delete</button>
+    </div>
+    <div class="field"><label for="itemMoveTo">Panel</label><select id="itemMoveTo"></select></div>
+  </div>
+</div>
+<div class="scrim" id="pickScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+    <div class="sheet-head"><div><h2 id="pickTitle">Choose an action</h2><div class="sub">Star Citizen actions use your keybinds automatically.</div></div>
+      <button class="x-btn" id="pickBack" type="button" aria-label="Back">×</button></div>
+    <input type="text" id="pickSearch" class="search" placeholder="Search actions" aria-label="Search actions" style="margin-top:12px">
+    <div class="acts" id="pickList"></div>
+    <h3>Or send custom keys</h3>
+    <div id="pickKeys" class="keyed">
+      <div class="keycaps"></div>
+      <div class="chips k-mods"></div>
+      <div class="fgrid">
+        <div class="field"><label for="pickKeySel">Key</label><select id="pickKeySel" class="k-sel"></select></div>
+        <div class="field"><label for="pickModeSel">Pressed</label>
+          <select id="pickModeSel" class="k-mode"><option value="tap">Tap</option><option value="press">Press</option><option value="long:450">Hold 0.45 s</option><option value="long:1000">Hold 1 s</option><option value="hold">While touched</option><option value="dtap">Double tap</option></select></div>
+      </div>
+    </div>
+    <div class="row"><button class="btn primary" id="pickUseKeys" type="button">Use these keys</button><button class="btn" id="pickNone" type="button">No action</button></div>
+  </div>
+</div>
+<div class="scrim" id="stepScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="stepTitle">
+    <div class="sheet-head"><div><h2 id="stepTitle">Sequence step</h2></div></div>
+    <div class="field"><span class="flabel">Action</span><button class="li" id="stepAct" type="button"></button></div>
+    <div class="fgrid">
+      <div class="field"><label for="stepIfKey">Only if the light</label><select id="stepIfKey"></select></div>
+      <div class="field"><label for="stepIfOp">is</label><select id="stepIfOp"><option value="eq">is</option><option value="ne">isn't</option></select></div>
+      <div class="field"><label for="stepIfVal">value</label><input type="text" id="stepIfVal" placeholder="NAV, 1, DOWN…"></div>
+      <div class="field"><label for="stepSetKey">Then set light</label><select id="stepSetKey"></select></div>
+      <div class="field"><label for="stepSetVal">to</label><input type="text" id="stepSetVal" placeholder="SCM, 0, UP…"></div>
+      <div class="field"><label for="stepAfter">Wait afterwards (ms)</label><input type="number" id="stepAfter" min="0" max="10000" placeholder="0"></div>
+      <div class="field"><label for="stepMs">Hold the key for (ms)</label><input type="number" id="stepMs" min="0" max="5000" placeholder="Use the action's own"></div>
+    </div>
+    <div class="row"><button class="btn primary" id="stepSave" type="button">Save step</button><button class="btn" id="stepCancel" type="button">Cancel</button></div>
+  </div>
+</div>
+<div class="scrim" id="waitScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="waitTitle">
+    <h2 id="waitTitle">Pause</h2>
+    <div class="field"><label for="waitMs">Milliseconds</label><input type="number" id="waitMs" min="50" max="10000"></div>
+    <div class="row"><button class="btn primary" id="waitSave" type="button">Save</button><button class="btn" data-close type="button">Cancel</button></div>
+  </div>
+</div>
+<div class="scrim" id="panelScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="panelHead">
+    <div class="sheet-head"><div><h2 id="panelHead">Panel</h2></div><button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="field"><label for="panelTitle">Placard</label><input type="text" id="panelTitle"></div>
+    <div class="toggle-row"><div><b>Hazard stripe</b><span>Marks the panel as dangerous, like Emergency.</span></div>
+      <button class="flip" role="switch" id="panelDanger" aria-checked="false" type="button">OFF</button></div>
+    <p class="muted">Use ◀ ▶ on the panel to move it, and − + to change how many columns it has.</p>
+    <div class="row"><button class="btn danger" id="panelDelete" type="button">Delete panel</button></div>
+  </div>
+</div>
+<div class="scrim" id="pageScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pageHead">
+    <div class="sheet-head"><div><h2 id="pageHead">Pages</h2><div class="sub">Rename, reorder or remove the tabs of this deck.</div></div>
+      <button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="list" id="pageList" style="margin-top:12px"></div>
+    <div class="row"><button class="btn primary" id="pageAdd" type="button">+ New page</button><button class="btn" id="pageCopy" type="button">Copy current page</button></div>
+  </div>
+</div>
+<div class="scrim" id="deckPropScrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="dpHead">
+    <div class="sheet-head"><div><h2 id="dpHead">Deck settings</h2></div><button class="x-btn" data-close aria-label="Close">×</button></div>
+    <div class="field"><label for="dpName">Name</label><input type="text" id="dpName"></div>
+    <div class="field"><label for="dpAbout">Description</label><input type="text" id="dpAbout" placeholder="What this deck is for"></div>
+    <h3>Skin</h3><div class="skins" id="dpSkins"></div>
+    <h3>Use automatically for</h3>
+    <p class="muted">Ships with these roles switch to this deck when you board.</p>
+    <div class="chips" id="dpRoles"></div>
+    <div class="field"><label for="dpMatch">Or ship names containing</label><input type="text" id="dpMatch" placeholder="Prospector, MOLE"></div>
+  </div>
+</div>
+
+<!-- pin pad -->
+<div class="scrim" id="pinScrim" hidden>
+  <div class="sheet pin-shell" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
+    <h2 id="pinTitle">Enter pairing PIN</h2>
+    <p class="muted">It's shown in the SC Glass window on your PC.</p>
+    <div class="pin-display" id="pinDisplay"></div>
+    <div class="pin-err" id="pinErr"></div>
+    <div class="pad-grid" id="pad"></div>
+  </div>
+</div>
+
+<script src="js/catalog.js"></script>
+<script src="js/decks.js"></script>
+<script src="js/app.js"></script>
+<script src="js/controls.js"></script>
+<script src="js/info.js"></script>
+<script src="js/editor.js"></script>
+</body>
+</html>

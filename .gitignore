@@ -1,0 +1,11 @@
+# local state written by SC Glass at runtime
+sc_glass_config.json
+*.tmp
+decks/
+cache/
+# python / build
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec

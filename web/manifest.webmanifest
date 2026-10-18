@@ -1,0 +1,11 @@
+{
+  "name": "SC Glass",
+  "short_name": "SC Glass",
+  "description": "Touch control deck for Star Citizen",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#121618",
+  "theme_color": "#121618",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
